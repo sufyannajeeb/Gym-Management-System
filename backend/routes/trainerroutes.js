@@ -2,11 +2,22 @@ const express = require('express');
 const Trainer = require('../models/trainermodel');
 const User = require('../models/usermodel');
 const Login = require('../models/loginmodel');
-const { protect, adminOnly } = require('../middleware/auth');
+const { protect, adminOnly, optionalAuth } = require('../middleware/auth');
+const { phoneError } = require('../utils/phone');
 
 const router = express.Router();
 
-router.get('/', async (req, res, next) => {
+// Salary and hire date are internal details that only admins should see.
+const forRequest = (req, trainer) => {
+  const plain = typeof trainer.toObject === 'function' ? trainer.toObject() : { ...trainer };
+  if (req.user?.role !== 'admin') {
+    delete plain.salary;
+    delete plain.hireDate;
+  }
+  return plain;
+};
+
+router.get('/', optionalAuth, async (req, res, next) => {
   try {
     const filter = {};
     if (req.query.available === 'true') filter.isAvailable = true;
@@ -15,20 +26,20 @@ router.get('/', async (req, res, next) => {
     const trainers = await Trainer.find(filter)
       .populate('user', 'fullName email phone role')
       .sort({ hireDate: -1 });
-    res.json(trainers);
+    res.json(trainers.map((trainer) => forRequest(req, trainer)));
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', optionalAuth, async (req, res, next) => {
   try {
     const trainer = await Trainer.findById(req.params.id).populate(
       'user',
       'fullName email phone role'
     );
     if (!trainer) return res.status(404).json({ message: 'Trainer not found' });
-    return res.json(trainer);
+    return res.json(forRequest(req, trainer));
   } catch (err) {
     return next(err);
   }
@@ -39,6 +50,11 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', protect, adminOnly, async (req, res, next) => {
   try {
     const { fullName, email, password, phone, ...trainerFields } = req.body;
+
+    const phoneIssue = phoneError(phone);
+    if (phoneIssue) {
+      return res.status(400).json({ message: phoneIssue });
+    }
 
     let userId = trainerFields.user;
 
@@ -91,6 +107,11 @@ router.put('/:id', protect, adminOnly, async (req, res, next) => {
   try {
     const { fullName, email, phone, password, ...trainerFields } = req.body;
 
+    const phoneIssue = phoneError(phone);
+    if (phoneIssue) {
+      return res.status(400).json({ message: phoneIssue });
+    }
+
     const existing = await Trainer.findById(req.params.id);
     if (!existing) return res.status(404).json({ message: 'Trainer not found' });
 
@@ -99,32 +120,54 @@ router.put('/:id', protect, adminOnly, async (req, res, next) => {
       runValidators: true,
     });
 
+    let account = existing.user ? await User.findById(existing.user) : null;
+
     const userUpdate = {};
     if (fullName) userUpdate.fullName = String(fullName).trim();
     if (email) userUpdate.email = String(email).toLowerCase().trim();
     if (phone !== undefined) userUpdate.phone = phone;
 
-    if (Object.keys(userUpdate).length > 0) {
+    if (account) {
       if (userUpdate.email) {
         const clash = await User.findOne({
           email: userUpdate.email,
-          _id: { $ne: existing.user },
+          _id: { $ne: account._id },
         });
         if (clash) return res.status(400).json({ message: 'Email already in use' });
       }
-      await User.findByIdAndUpdate(existing.user, userUpdate, { runValidators: true });
+      if (Object.keys(userUpdate).length > 0) {
+        Object.assign(account, userUpdate);
+        await account.save();
+      }
+    } else if (email) {
+      // The trainer is orphaned (its linked user no longer exists). Recreate the
+      // account so the name/email can actually be stored and displayed.
+      const lowerEmail = String(email).toLowerCase().trim();
+      account = await User.findOne({ email: lowerEmail });
+      if (account) {
+        if (fullName) {
+          account.fullName = String(fullName).trim();
+          await account.save();
+        }
+      } else {
+        account = await User.create({
+          fullName: fullName || `Trainer ${existing.employeeCode}`,
+          email: lowerEmail,
+          phone,
+          role: 'trainer',
+        });
+      }
+      trainer.user = account._id;
+      await trainer.save();
     }
 
-    if (password) {
-      const account = await User.findById(existing.user);
-      if (account) {
-        let credential = await Login.findOne({ user: account._id });
-        if (credential) {
-          credential.password = password;
-          await credential.save();
-        } else {
-          await Login.create({ user: account._id, email: account.email, password });
-        }
+    if (password && account) {
+      let credential = await Login.findOne({ user: account._id });
+      if (credential) {
+        credential.password = password;
+        await credential.save();
+      } else {
+        await Login.create({ user: account._id, email: account.email, password });
       }
     }
 

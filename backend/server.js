@@ -1,7 +1,9 @@
-require('dotenv').config();
+﻿const path = require('path');
+// Always read the project root .env so the server connects to the same database
+// no matter which directory it is started from.
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const fs = require('fs');
 
 const connectDB = require('./db');
@@ -12,11 +14,12 @@ const memberRoutes = require('./routes/memberroutes');
 const trainerRoutes = require('./routes/trainerroutes');
 const statsRoutes = require('./routes/statsroutes');
 const contactRoutes = require('./routes/contactroutes');
+const storeRoutes = require('./routes/storeroutes');
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 
 const publicDir = path.join(__dirname, '..', 'frontend', 'build');
 if (fs.existsSync(publicDir)) {
@@ -33,6 +36,7 @@ app.use('/api/members', memberRoutes);
 app.use('/api/trainers', trainerRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/store', storeRoutes);
 
 // Unknown non-API routes fall back to the React build so that client side
 // routes such as /dashboard can be refreshed or opened directly.

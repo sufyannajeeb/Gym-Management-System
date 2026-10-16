@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { normalizePhone, isValidPhone, PHONE_MESSAGE } = require('../utils/phone');
 
 const userSchema = new mongoose.Schema(
   {
@@ -24,7 +25,8 @@ const userSchema = new mongoose.Schema(
     phone: {
       type: String,
       trim: true,
-      match: [/^[0-9+\-() ]{7,20}$/, 'Please provide a valid phone number'],
+      set: normalizePhone,
+      validate: { validator: isValidPhone, message: PHONE_MESSAGE },
     },
     isActive: {
       type: Boolean,

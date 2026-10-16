@@ -1,4 +1,6 @@
-require('dotenv').config();
+const path = require('path');
+// Read the project root .env so seeding targets the same database as the server.
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const connectDB = require('./db');
 const User = require('./models/usermodel');
 const Member = require('./models/membermodel');
@@ -56,25 +58,25 @@ const seed = async () => {
       fullName: 'Site Admin',
       email: 'admin@gymfit.com',
       role: 'admin',
-      phone: '+1 555 0100',
+      phone: '9800000100',
     },
     {
       fullName: 'Marcus Reid',
       email: 'trainer@gymfit.com',
       role: 'trainer',
-      phone: '+1 555 0142',
+      phone: '9800000142',
     },
     {
       fullName: 'Sofia Bennett',
       email: 'sofia@example.com',
       role: 'member',
-      phone: '+1 555 0188',
+      phone: '9800000188',
     },
     {
       fullName: 'Daniel Okafor',
       email: 'daniel@example.com',
       role: 'member',
-      phone: '+1 555 0163',
+      phone: '9800000163',
     },
   ]);
 
@@ -106,7 +108,7 @@ const seed = async () => {
       joinDate: new Date('2025-11-02'),
       status: 'active',
       trainer: trainer._id,
-      emergencyContact: { name: 'Lena Bennett', phone: '+1 555 0199', relation: 'Sister' },
+      emergencyContact: { name: 'Lena Bennett', phone: '9800000199', relation: 'Sister' },
     },
     {
       user: users[3]._id,

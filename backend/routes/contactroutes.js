@@ -1,6 +1,7 @@
 const express = require('express');
 const ContactMessage = require('../models/contactmodel');
 const { protect, adminOnly } = require('../middleware/auth');
+const { phoneError } = require('../utils/phone');
 
 const router = express.Router();
 
@@ -11,6 +12,11 @@ router.post('/', async (req, res, next) => {
 
     if (!email) {
       return res.status(400).json({ message: 'Email is required' });
+    }
+
+    const phoneIssue = phoneError(phone);
+    if (phoneIssue) {
+      return res.status(400).json({ message: phoneIssue });
     }
 
     const saved = await ContactMessage.create({

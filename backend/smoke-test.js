@@ -1,6 +1,8 @@
 /* Temporary smoke test: exercises the new/changed API endpoints and cleans up
    after itself so no data is left behind in the local database. */
-require('dotenv').config();
+const path = require('path');
+// Match the server: always read the project root .env.
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const axios = require('axios');
 const mongoose = require('mongoose');
 
@@ -84,7 +86,7 @@ const run = async () => {
       fullName: 'Smoke Member',
       email: memberEmail,
       password: 'password123',
-      phone: '+1 555 0111',
+      phone: '9800011111',
       membership: plans.data[0]?._id,
       status: 'active',
     },
@@ -111,10 +113,10 @@ const run = async () => {
       {
         fullName: 'Smoke Member Renamed',
         email: memberEmail,
-        phone: '+1 555 0222',
+        phone: '9800022222',
         status: 'active',
         membership: plans.data[0]?._id,
-        emergencyContact: { name: 'Jane Doe', phone: '+1 555 0333', relation: 'Sister' },
+        emergencyContact: { name: 'Jane Doe', phone: '9800033333', relation: 'Sister' },
         address: '1 Smoke Street',
       },
       { ...auth, validateStatus: () => true }
@@ -123,7 +125,7 @@ const run = async () => {
       'PUT /api/members/:id updates profile',
       edited.status === 200 &&
         edited.data.user?.fullName === 'Smoke Member Renamed' &&
-        edited.data.user?.phone === '+1 555 0222' &&
+        edited.data.user?.phone === '9800022222' &&
         edited.data.address === '1 Smoke Street',
       JSON.stringify(edited.data).slice(0, 160)
     );

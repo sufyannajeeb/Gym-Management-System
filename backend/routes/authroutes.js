@@ -1,26 +1,40 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const User = require('../models/usermodel');
 const Member = require('../models/membermodel');
+const Membership = require('../models/membershipmodel');
 const Trainer = require('../models/trainermodel');
 const Login = require('../models/loginmodel');
 const LoginAttempt = require('../models/loginattemptmodel');
 const { signToken, protect, adminOnly, optionalAuth } = require('../middleware/auth');
+const { assertPlanSwitchAllowed, formatEligibleDate } = require('../utils/planSwitch');
+const { phoneError } = require('../utils/phone');
 
 const router = express.Router();
 
-const logAttempt = (req, user, success, failureReason) =>
-  LoginAttempt.create({
-    user: user?._id,
+const logAttempt = (req, user, success, failureReason) => {
+  // The hardcoded fallback admin uses a non-ObjectId id, which the LoginAttempt
+  // schema cannot store. Skip the user reference in that case.
+  const userId =
+    user?._id && mongoose.Types.ObjectId.isValid(user._id) ? user._id : undefined;
+  return LoginAttempt.create({
+    user: userId,
     email: String(req.body.email || '').toLowerCase(),
     success,
     failureReason,
     ipAddress: req.ip,
     userAgent: req.headers['user-agent'],
   }).catch((err) => console.error('Login log failed:', err.message));
+};
 
 router.post('/register', optionalAuth, async (req, res, next) => {
   try {
     const { fullName, email, password, phone, role } = req.body;
+
+    const phoneIssue = phoneError(phone);
+    if (phoneIssue) {
+      return res.status(400).json({ message: phoneIssue });
+    }
 
     // Public signups are always members; only an authenticated admin can
     // create staff / trainer / admin accounts through this endpoint.
@@ -42,6 +56,18 @@ router.post('/register', optionalAuth, async (req, res, next) => {
     } catch (err) {
       await User.deleteOne({ _id: user._id });
       return next(err);
+    }
+
+    // Create an (empty) member profile so newly registered users show up in the
+    // admin area right away. They choose a membership from the member module.
+    if (assignedRole === 'member') {
+      try {
+        await Member.create({ user: user._id, status: 'active', joinDate: new Date() });
+      } catch (err) {
+        // Profile creation is best-effort; a missing profile is recovered on
+        // demand by the "choose membership" flow.
+        console.error('Member profile creation failed:', err.message);
+      }
     }
 
     return res.status(201).json({
@@ -167,9 +193,65 @@ router.get('/my/trainer', protect, async (req, res, next) => {
 
 router.get('/my/membership', protect, async (req, res, next) => {
   try {
-    const member = await Member.findOne({ user: req.user.id }).populate('membership');
+    const member = await Member.findOne({ user: req.user.id })
+      .populate('membership')
+      .populate({ path: 'trainer', select: 'employeeCode specialization user', populate: { path: 'user', select: 'fullName email phone' } });
     if (!member) return res.status(404).json({ message: 'No membership found' });
     return res.json(member);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Authenticated users choose/switch their own membership plan here.
+router.post('/my/membership', protect, async (req, res, next) => {
+  try {
+    const membershipId =
+      req.body?.membership ||
+      req.body?.membershipId ||
+      req.body?.membership_id ||
+      req.body?.plan ||
+      req.body?.planId;
+
+    if (!membershipId) {
+      return res.status(400).json({ message: 'Membership id is required' });
+    }
+
+    const membership = await Membership.findById(membershipId);
+    if (!membership || membership.isActive === false) {
+      return res.status(404).json({ message: 'Membership plan not found' });
+    }
+
+    let member = await Member.findOne({ user: req.user.id });
+    if (!member) {
+      member = new Member({ user: req.user.id, status: 'active', joinDate: new Date() });
+    }
+
+    const blocked = await assertPlanSwitchAllowed(member, membership._id);
+    if (blocked) {
+      return res.status(403).json({
+        message: `You can switch plans after ${formatEligibleDate(
+          blocked.eligibleAt
+        )}. Your current plan must finish first.`,
+        eligibleAt: blocked.eligibleAt,
+        canSwitchPlan: false,
+      });
+    }
+
+    if (String(member.membership || '') !== String(membership._id)) {
+      member.planStartedAt = new Date();
+    }
+    member.membership = membership._id;
+    if (!member.joinDate) member.joinDate = new Date();
+    if (!member.status || member.status === 'expired') member.status = 'active';
+    await member.save();
+
+    const populated = await Member.findById(member._id)
+      .populate('user', 'fullName email phone')
+      .populate('membership', 'name price durationDays features sessionsPerWeek description')
+      .populate({ path: 'trainer', select: 'employeeCode specialization user', populate: { path: 'user', select: 'fullName email phone' } });
+
+    return res.json(populated);
   } catch (err) {
     return next(err);
   }

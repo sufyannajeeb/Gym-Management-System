@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { normalizePhone, isValidPhone, PHONE_MESSAGE } = require('../utils/phone');
 
 const contactSchema = new mongoose.Schema(
   {
@@ -23,7 +24,8 @@ const contactSchema = new mongoose.Schema(
     phone: {
       type: String,
       trim: true,
-      maxlength: 30,
+      set: normalizePhone,
+      validate: { validator: isValidPhone, message: PHONE_MESSAGE },
     },
     message: {
       type: String,
